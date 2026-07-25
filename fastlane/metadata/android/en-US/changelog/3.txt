@@ -1,0 +1,5 @@
+Skein — offline-first Bluetooth mesh messaging.
+
+This line of builds continues the mesh chat foundation (BLE multi-hop, E2E private messages, channels, store-and-forward) under the Skein product name (applicationId com.skein.android).
+
+See the project CHANGELOG and repository for detailed version history.

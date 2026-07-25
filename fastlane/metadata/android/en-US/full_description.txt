@@ -1,0 +1,18 @@
+Skein is offline-first Bluetooth mesh messaging for privacy-focused, campus, and disaster-resilient communication.
+
+Chat with nearby people over a multi-hop Bluetooth Low Energy mesh — no phone numbers, no mandatory accounts, and no central chat server for mesh mode. Messages can relay through peers so you stay connected when the internet is down or unavailable.
+
+Features:
+• Decentralized BLE mesh with automatic peer discovery
+• End-to-end encryption for private conversations
+• Topic channels (optional password protection)
+• Store-and-forward for offline peers
+• Voice notes, images, and file transfer over the mesh
+• IRC-style commands (/join, /msg, and more)
+• Battery-aware scanning and a modern Material 3 interface
+• Optional location-scoped (geohash) channels over the internet when you enable them
+• Optional Tor routing for supported internet features
+
+Skein builds on proven open-source mesh messaging ideas and evolves them as an engineering project focused on resilient local communication. Internet features are optional; core mesh chat is designed to work without infrastructure.
+
+Requires Bluetooth LE and Android 8.0+. Location permission is used for BLE scanning (Android platform requirement) and for optional geohash features only.

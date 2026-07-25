@@ -1,0 +1,1 @@
+Offline-first Bluetooth mesh messaging for private, resilient chat
