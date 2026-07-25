@@ -14,6 +14,7 @@ import com.skein.android.protocol.MessageType
 import com.skein.android.protocol.SpecialRecipients
 import com.skein.android.model.RequestSyncPacket
 import com.skein.android.sync.GossipSyncManager
+import com.skein.android.ordering.LamportClockRegistry
 import com.skein.android.util.toHexString
 import com.skein.android.services.VerificationService
 import com.skein.android.service.TransportBridgeService
@@ -53,6 +54,18 @@ class BluetoothMeshService(private val context: Context) : TransportBridgeServic
     private val securityManager = SecurityManager(encryptionService, myPeerID)
     private val storeForwardManager = StoreForwardManager()
     private val messageHandler = MessageHandler(myPeerID, context.applicationContext)
+    private val lamportClock = LamportClockRegistry.forNode(myPeerID)
+    private var lastEmittedLogicalCounter = 0L
+
+    private fun nextOutgoingLogicalTimestamp() = synchronized(this) {
+        val current = lamportClock.current()
+        if (current.counter > lastEmittedLogicalCounter) {
+            lastEmittedLogicalCounter = current.counter
+            current
+        } else {
+            lamportClock.tick().also { lastEmittedLogicalCounter = it.counter }
+        }
+    }
     internal val connectionManager = BluetoothConnectionManager(context, myPeerID, fragmentManager) // Made internal for access
     private val packetProcessor = PacketProcessor(myPeerID)
     private lateinit var gossipSyncManager: GossipSyncManager
@@ -772,7 +785,9 @@ class BluetoothMeshService(private val context: Context) : TransportBridgeServic
                 senderID = hexStringToByteArray(myPeerID),
                 recipientID = SpecialRecipients.BROADCAST,
                 timestamp = System.currentTimeMillis().toULong(),
-                payload = content.toByteArray(Charsets.UTF_8),
+                payload = com.skein.android.ordering.LogicalMessageEnvelope.encodeIfValid(
+                    nextOutgoingLogicalTimestamp(), content.toByteArray(Charsets.UTF_8)
+                ),
                 signature = null,
                 ttl = MAX_TTL
             )
@@ -917,7 +932,9 @@ class BluetoothMeshService(private val context: Context) : TransportBridgeServic
                     // Create TLV-encoded private message exactly like iOS
                     val privateMessage = com.skein.android.model.PrivateMessagePacket(
                         messageID = finalMessageID,
-                        content = content
+                        content = content,
+                        logicalCounter = nextOutgoingLogicalTimestamp().counter,
+                        logicalNodeId = myPeerID
                     )
                     
                     val tlvData = privateMessage.encode()

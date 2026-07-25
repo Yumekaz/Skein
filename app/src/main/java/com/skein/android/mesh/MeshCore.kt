@@ -16,6 +16,8 @@ import com.skein.android.protocol.MessageType
 import com.skein.android.protocol.SpecialRecipients
 import com.skein.android.service.TransportBridgeService
 import com.skein.android.sync.GossipSyncManager
+import com.skein.android.ordering.LamportClockRegistry
+import com.skein.android.ordering.LogicalMessageEnvelope
 import com.skein.android.util.toHexString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -54,6 +56,18 @@ class MeshCore(
     private val securityManager = SecurityManager(encryptionService, myPeerID)
     private val storeForwardManager = StoreForwardManager()
     private val messageHandler = MessageHandler(myPeerID, context.applicationContext)
+    private val lamportClock = LamportClockRegistry.forNode(myPeerID)
+    private var lastEmittedLogicalCounter = 0L
+
+    private fun nextOutgoingLogicalTimestamp() = synchronized(this) {
+        val current = lamportClock.current()
+        if (current.counter > lastEmittedLogicalCounter) {
+            lastEmittedLogicalCounter = current.counter
+            current
+        } else {
+            lamportClock.tick().also { lastEmittedLogicalCounter = it.counter }
+        }
+    }
     private val packetProcessor = PacketProcessor(myPeerID)
     private val directPeers = ConcurrentHashMap.newKeySet<String>()
 
@@ -420,7 +434,9 @@ class MeshCore(
                 senderID = MeshPacketUtils.hexStringToByteArray(myPeerID),
                 recipientID = SpecialRecipients.BROADCAST,
                 timestamp = System.currentTimeMillis().toULong(),
-                payload = content.toByteArray(Charsets.UTF_8),
+                payload = LogicalMessageEnvelope.encodeIfValid(
+                    nextOutgoingLogicalTimestamp(), content.toByteArray(Charsets.UTF_8)
+                ),
                 signature = null,
                 ttl = maxTtl
             )
@@ -494,7 +510,13 @@ class MeshCore(
 
             if (encryptionService.hasEstablishedSession(recipientPeerID)) {
                 try {
-                    val privateMessage = PrivateMessagePacket(messageID = finalMessageID, content = content)
+                    val logical = nextOutgoingLogicalTimestamp()
+                    val privateMessage = PrivateMessagePacket(
+                        messageID = finalMessageID,
+                        content = content,
+                        logicalCounter = logical.counter,
+                        logicalNodeId = logical.nodeId
+                    )
                     val tlvData = privateMessage.encode() ?: return@launch
                     val messagePayload = NoisePayload(
                         type = NoisePayloadType.PRIVATE_MESSAGE,

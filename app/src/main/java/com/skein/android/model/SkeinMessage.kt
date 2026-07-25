@@ -69,7 +69,10 @@ data class SkeinMessage(
     val encryptedContent: ByteArray? = null,
     val isEncrypted: Boolean = false,
     val deliveryStatus: DeliveryStatus? = null,
-    val powDifficulty: Int? = null
+    val powDifficulty: Int? = null,
+    /** Optional Lamport metadata. Null means this is a legacy/unordered message. */
+    val logicalCounter: Long? = null,
+    val logicalNodeId: String? = null
 ) : Parcelable {
 
     /**
@@ -354,5 +357,4 @@ data class SkeinMessage(
         return result
     }
 }
-
 

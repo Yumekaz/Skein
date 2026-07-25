@@ -91,7 +91,7 @@ object AppStateStore {
             if (seenMessageIds.contains(msg.id) || seenPublicMessageKeys.contains(publicKey)) return
             seenMessageIds.add(msg.id)
             seenPublicMessageKeys.add(publicKey)
-            _publicMessages.value = _publicMessages.value + msg
+            _publicMessages.value = ordered(_publicMessages.value + msg)
         }
     }
 
@@ -100,8 +100,7 @@ object AppStateStore {
             if (seenMessageIds.contains(msg.id)) return
             seenMessageIds.add(msg.id)
             val map = _privateMessages.value.toMutableMap()
-            val list = (map[peerID] ?: emptyList()) + msg
-            map[peerID] = list
+            map[peerID] = ordered((map[peerID] ?: emptyList()) + msg)
             _privateMessages.value = map
         }
     }
@@ -144,8 +143,7 @@ object AppStateStore {
             if (seenMessageIds.contains(msg.id)) return
             seenMessageIds.add(msg.id)
             val map = _channelMessages.value.toMutableMap()
-            val list = (map[channel] ?: emptyList()) + msg
-            map[channel] = list
+            map[channel] = ordered((map[channel] ?: emptyList()) + msg)
             _channelMessages.value = map
         }
     }
@@ -173,5 +171,27 @@ object AppStateStore {
             msg.channel ?: "",
             msg.content
         ).joinToString("\u001F")
+    }
+
+    /**
+     * Orders messages deterministically when both sides carry Lamport metadata.
+     * Legacy messages retain the existing timestamp/id fallback and are kept after
+     * fully ordered messages so old peers remain visible without inventing causality.
+     */
+    private fun ordered(messages: List<SkeinMessage>): List<SkeinMessage> {
+        return messages.sortedWith(Comparator { left, right ->
+            val leftCounter = left.logicalCounter
+            val rightCounter = right.logicalCounter
+            val leftNode = left.logicalNodeId
+            val rightNode = right.logicalNodeId
+            if (leftCounter != null && rightCounter != null && !leftNode.isNullOrBlank() && !rightNode.isNullOrBlank()) {
+                leftCounter.compareTo(rightCounter).takeIf { it != 0 }
+                    ?: leftNode.compareTo(rightNode).takeIf { it != 0 }
+                    ?: left.timestamp.compareTo(right.timestamp)
+            } else {
+                left.timestamp.compareTo(right.timestamp).takeIf { it != 0 }
+                    ?: left.id.compareTo(right.id)
+            }
+        })
     }
 }

@@ -50,4 +50,15 @@ class LamportOrderingTest {
 
         assertTrue(left < right)
     }
+
+    @Test
+    fun `arbitrary merge arrival converges to the same sequence`() {
+        val partitionA = listOf(LogicalTimestamp(1, "a"), LogicalTimestamp(3, "a"))
+        val partitionB = listOf(LogicalTimestamp(1, "b"), LogicalTimestamp(2, "b"))
+
+        val firstArrival = LamportMessageOrdering.sort(partitionA + partitionB) { it }
+        val secondArrival = LamportMessageOrdering.sort(partitionB.reversed() + partitionA.reversed()) { it }
+
+        assertEquals(firstArrival, secondArrival)
+    }
 }

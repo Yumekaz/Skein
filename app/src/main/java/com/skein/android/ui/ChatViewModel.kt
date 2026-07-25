@@ -15,6 +15,7 @@ import com.skein.android.mesh.MeshService
 import com.skein.android.service.MeshServiceHolder
 import com.skein.android.model.SkeinMessage
 import com.skein.android.model.SkeinMessageType
+import com.skein.android.ordering.LamportClockRegistry
 import com.skein.android.nostr.NostrIdentityBridge
 import com.skein.android.protocol.SkeinPacket
 
@@ -562,7 +563,9 @@ class ChatViewModel(
                     isRelay = false,
                     senderPeerID = mesh.myPeerID,
                     mentions = if (mentions.isNotEmpty()) mentions else null,
-                    channel = currentChannelValue
+                    channel = currentChannelValue,
+                    logicalCounter = LamportClockRegistry.forNode(mesh.myPeerID).tick().counter,
+                    logicalNodeId = mesh.myPeerID
                 )
 
                 if (currentChannelValue != null) {

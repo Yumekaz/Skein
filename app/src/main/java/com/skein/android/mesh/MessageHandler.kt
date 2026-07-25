@@ -5,6 +5,8 @@ import com.skein.android.model.SkeinMessage
 import com.skein.android.model.SkeinMessageType
 import com.skein.android.model.IdentityAnnouncement
 import com.skein.android.model.RoutedPacket
+import com.skein.android.ordering.LogicalMessageEnvelope
+import com.skein.android.ordering.LamportClockRegistry
 import com.skein.android.protocol.SkeinPacket
 import com.skein.android.protocol.MessageType
 import com.skein.android.sync.PacketIdUtil
@@ -32,6 +34,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     
     // Coroutines
     private val handlerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val lamportClock = LamportClockRegistry.forNode(myPeerID)
     
     /**
      * Handle Noise encrypted transport message - SIMPLIFIED iOS-compatible version
@@ -80,6 +83,14 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                     // Decode TLV private message exactly like iOS
                     val privateMessage = com.skein.android.model.PrivateMessagePacket.decode(noisePayload.data)
                     if (privateMessage != null) {
+                        if (privateMessage.logicalCounter != null && privateMessage.logicalNodeId != null) {
+                            lamportClock.observe(
+                                com.skein.android.ordering.LogicalTimestamp(
+                                    privateMessage.logicalCounter,
+                                    privateMessage.logicalNodeId
+                                )
+                            )
+                        }
                         Log.d(TAG, "🔓 Decrypted TLV PM from $peerID: ${privateMessage.content.take(30)}...")
 
                         // Handle favorite/unfavorite notifications embedded as PMs
@@ -102,7 +113,9 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                             isPrivate = true,
                             recipientNickname = delegate?.getMyNickname(),
                             senderPeerID = peerID,
-                            mentions = null // TODO: Parse mentions if needed
+                            mentions = null, // TODO: Parse mentions if needed
+                            logicalCounter = privateMessage.logicalCounter,
+                            logicalNodeId = privateMessage.logicalNodeId
                         )
                         
                         // Notify delegate
@@ -420,12 +433,16 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             }
 
             // Fallback: plain text
+            val envelope = LogicalMessageEnvelope.decode(packet.payload)
+            envelope?.let { lamportClock.observe(it.timestamp) }
             val message = SkeinMessage(
                 id = PacketIdUtil.computeIdHex(packet).uppercase(),
                 sender = delegate?.getPeerNickname(peerID) ?: "unknown",
-                content = String(packet.payload, Charsets.UTF_8),
+                content = String(envelope?.content ?: packet.payload, Charsets.UTF_8),
                 senderPeerID = peerID,
-                timestamp = Date(packet.timestamp.toLong())
+                timestamp = Date(packet.timestamp.toLong()),
+                logicalCounter = envelope?.timestamp?.counter,
+                logicalNodeId = envelope?.timestamp?.nodeId
             )
             delegate?.onMessageReceived(message)
         } catch (e: Exception) {

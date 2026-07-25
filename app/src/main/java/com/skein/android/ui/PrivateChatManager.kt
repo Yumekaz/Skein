@@ -4,6 +4,7 @@ import com.skein.android.model.SkeinMessage
 import com.skein.android.model.DeliveryStatus
 import com.skein.android.mesh.PeerFingerprintManager
 import com.skein.android.mesh.MeshService
+import com.skein.android.ordering.LamportClockRegistry
 import java.security.MessageDigest
 
 import java.util.*
@@ -108,7 +109,9 @@ class PrivateChatManager(
             isPrivate = true,
             recipientNickname = recipientNickname,
             senderPeerID = myPeerID,
-            deliveryStatus = DeliveryStatus.Sending
+            deliveryStatus = DeliveryStatus.Sending,
+            logicalCounter = LamportClockRegistry.forNode(myPeerID).tick().counter,
+            logicalNodeId = myPeerID
         )
 
         messageManager.addPrivateMessage(peerID, message)

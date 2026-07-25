@@ -2,6 +2,7 @@ package com.skein.android.model
 
 import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
+import com.skein.android.ordering.MAX_LAMPORT_COUNTER
 
 /**
  * Noise encrypted payload types and handling - 100% compatible with iOS SimplifiedBluetoothService
@@ -102,7 +103,9 @@ data class NoisePayload(
 @Parcelize
 data class PrivateMessagePacket(
     val messageID: String,
-    val content: String
+    val content: String,
+    val logicalCounter: Long? = null,
+    val logicalNodeId: String? = null
 ) : Parcelable {
 
     /**
@@ -110,7 +113,9 @@ data class PrivateMessagePacket(
      */
     private enum class TLVType(val value: UByte) {
         MESSAGE_ID(0x00u),
-        CONTENT(0x01u);
+        CONTENT(0x01u),
+        LOGICAL_COUNTER(0x02u),
+        LOGICAL_NODE_ID(0x03u);
         
         companion object {
             fun fromValue(value: UByte): TLVType? {
@@ -143,6 +148,21 @@ data class PrivateMessagePacket(
         result.add(TLVType.CONTENT.value.toByte())
         result.add(contentData.size.toByte())
         result.addAll(contentData.toList())
+
+        logicalCounter?.let { counter ->
+            if (counter < 0) return null
+            val counterData = java.nio.ByteBuffer.allocate(8).putLong(counter).array()
+            result.add(TLVType.LOGICAL_COUNTER.value.toByte())
+            result.add(counterData.size.toByte())
+            result.addAll(counterData.toList())
+        }
+        logicalNodeId?.let { nodeId ->
+            val nodeData = nodeId.toByteArray(Charsets.UTF_8)
+            if (nodeData.isEmpty() || nodeData.size > 255) return null
+            result.add(TLVType.LOGICAL_NODE_ID.value.toByte())
+            result.add(nodeData.size.toByte())
+            result.addAll(nodeData.toList())
+        }
         
         return result.toByteArray()
     }
@@ -155,6 +175,8 @@ data class PrivateMessagePacket(
             var offset = 0
             var messageID: String? = null
             var content: String? = null
+            var logicalCounter: Long? = null
+            var logicalNodeId: String? = null
             
             while (offset + 2 <= data.size) {
                 // Read TLV type
@@ -180,11 +202,21 @@ data class PrivateMessagePacket(
                     TLVType.CONTENT -> {
                         content = String(value, Charsets.UTF_8)
                     }
+                    TLVType.LOGICAL_COUNTER -> {
+                        if (value.size != 8) return null
+                        logicalCounter = java.nio.ByteBuffer.wrap(value).long
+                        if (logicalCounter !in 0 until MAX_LAMPORT_COUNTER) return null
+                    }
+                    TLVType.LOGICAL_NODE_ID -> {
+                        logicalNodeId = String(value, Charsets.UTF_8).takeIf { it.isNotBlank() }
+                            ?: return null
+                    }
                 }
             }
             
             return if (messageID != null && content != null) {
-                PrivateMessagePacket(messageID, content)
+                if ((logicalCounter == null) != (logicalNodeId == null)) return null
+                PrivateMessagePacket(messageID, content, logicalCounter, logicalNodeId)
             } else {
                 null
             }
