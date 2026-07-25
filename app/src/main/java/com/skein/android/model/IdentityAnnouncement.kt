@@ -12,7 +12,8 @@ import com.skein.android.util.*
 data class IdentityAnnouncement(
     val nickname: String,
     val noisePublicKey: ByteArray,    // Noise static public key (Curve25519.KeyAgreement)
-    val signingPublicKey: ByteArray   // Ed25519 public key for signing
+    val signingPublicKey: ByteArray,  // Ed25519 public key for signing
+    val fecVersion: Int? = null
 ) : Parcelable {
 
     /**
@@ -21,7 +22,8 @@ data class IdentityAnnouncement(
     private enum class TLVType(val value: UByte) {
         NICKNAME(0x01u),
         NOISE_PUBLIC_KEY(0x02u),
-        SIGNING_PUBLIC_KEY(0x03u);  // NEW: Ed25519 signing public key
+        SIGNING_PUBLIC_KEY(0x03u),
+        FEC_CAPABILITY(0x04u);
         
         companion object {
             fun fromValue(value: UByte): TLVType? {
@@ -57,6 +59,12 @@ data class IdentityAnnouncement(
         result.add(TLVType.SIGNING_PUBLIC_KEY.value.toByte())
         result.add(signingPublicKey.size.toByte())
         result.addAll(signingPublicKey.toList())
+        fecVersion?.let { version ->
+            if (version !in 1..255) return null
+            result.add(TLVType.FEC_CAPABILITY.value.toByte())
+            result.add(1)
+            result.add(version.toByte())
+        }
         
         return result.toByteArray()
     }
@@ -73,6 +81,7 @@ data class IdentityAnnouncement(
             var nickname: String? = null
             var noisePublicKey: ByteArray? = null
             var signingPublicKey: ByteArray? = null
+            var fecVersion: Int? = null
             
             while (offset + 2 <= dataCopy.size) {
                 // Read TLV type
@@ -102,6 +111,10 @@ data class IdentityAnnouncement(
                     TLVType.SIGNING_PUBLIC_KEY -> {
                         signingPublicKey = value
                     }
+                    TLVType.FEC_CAPABILITY -> {
+                        if (value.size != 1) return null
+                        fecVersion = value[0].toInt() and 0xff
+                    }
                     null -> {
                         // Unknown TLV; skip (tolerant decoder for forward compatibility)
                         continue
@@ -111,7 +124,7 @@ data class IdentityAnnouncement(
             
             // All three fields are required
             return if (nickname != null && noisePublicKey != null && signingPublicKey != null) {
-                IdentityAnnouncement(nickname, noisePublicKey, signingPublicKey)
+                IdentityAnnouncement(nickname, noisePublicKey, signingPublicKey, fecVersion)
             } else {
                 null
             }

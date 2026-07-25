@@ -622,7 +622,7 @@ class MeshCore(
                 Log.e("MeshCore", "No signing public key available for announcement")
                 return@launch
             }
-            val announcement = IdentityAnnouncement(nickname, staticKey, signingKey)
+            val announcement = IdentityAnnouncement(nickname, staticKey, signingKey, com.skein.android.fec.FecConfig.VERSION)
             val tlvPayload = buildAnnouncementPayload(announcement, nickname) ?: return@launch
             val announcePacket = SkeinPacket(
                 type = MessageType.ANNOUNCE.value,
@@ -643,7 +643,7 @@ class MeshCore(
             ?: myPeerID
         val staticKey = encryptionService.getStaticPublicKey() ?: return
         val signingKey = encryptionService.getSigningPublicKey() ?: return
-        val announcement = IdentityAnnouncement(nickname, staticKey, signingKey)
+        val announcement = IdentityAnnouncement(nickname, staticKey, signingKey, com.skein.android.fec.FecConfig.VERSION)
         val tlvPayload = buildAnnouncementPayload(announcement, nickname) ?: return
         val packet = SkeinPacket(
             type = MessageType.ANNOUNCE.value,

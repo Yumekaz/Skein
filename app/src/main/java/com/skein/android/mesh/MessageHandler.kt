@@ -284,6 +284,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         
         // Extract nickname and public keys from TLV data
         val nickname = announcement.nickname
+        com.skein.android.fec.FecCapabilityRegistry.update(peerID, announcement.fecVersion)
         val noisePublicKey = announcement.noisePublicKey
         val signingPublicKey = announcement.signingPublicKey
         
