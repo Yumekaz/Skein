@@ -35,6 +35,17 @@ class ReedSolomonCodecTest {
         assertNull(FecFragmentPayload.decode(encoded))
     }
 
+    @Test fun `recovers random loss patterns within parity budget`() {
+        val data = data(4, 96)
+        repeat(20) { seed ->
+            val shards = codec.encode(data).map { it.copyOf() }.toTypedArray<ByteArray?>()
+            val removed = (0 until 6).shuffled(Random(seed.toLong())).take(2)
+            removed.forEach { shards[it] = null }
+            val recovered = codec.reconstruct(shards)
+            data.indices.forEach { assertArrayEquals(data[it], recovered[it]) }
+        }
+    }
+
     private fun data(count: Int, size: Int): List<ByteArray> {
         val random = Random(7)
         return List(count) { ByteArray(size).also { random.nextBytes(it) } }

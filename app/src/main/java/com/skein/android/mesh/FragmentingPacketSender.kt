@@ -4,6 +4,7 @@ import android.util.Log
 import com.skein.android.model.RoutedPacket
 import com.skein.android.protocol.SkeinPacket
 import com.skein.android.protocol.MessageType
+import com.skein.android.fec.FecDebugPacketLoss
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -28,10 +29,11 @@ class FragmentingPacketSender(
     fun send(
         routed: RoutedPacket,
         description: String,
+        useFec: Boolean = false,
         sendSingle: (RoutedPacket) -> Boolean
     ): Boolean {
         val transferId = transferIdFor(routed)
-        val packets = packetsForTransport(routed.packet) ?: return false
+        val packets = packetsForTransport(routed.packet, useFec) ?: return false
         val total = packets.size
 
         if (total <= 1) {
@@ -58,6 +60,12 @@ class FragmentingPacketSender(
                 if (transferId != null && transferJobs[transferId]?.isCancelled == true) return@launch
 
                 val fragment = routed.copy(packet = packet, transferId = transferId)
+                if (useFec && packet.type == MessageType.FRAGMENT.value && FecDebugPacketLoss.shouldDrop()) {
+                    Log.d(logTag, "Debug loss injector dropped one FEC fragment for $description")
+                    sent += 1
+                    if (transferId != null) TransferProgressManager.progress(transferId, sent, total)
+                    continue
+                }
                 val delivered = try {
                     sendSingle(fragment)
                 } catch (e: Exception) {
@@ -98,14 +106,16 @@ class FragmentingPacketSender(
         return true
     }
 
-    private fun packetsForTransport(packet: SkeinPacket): List<SkeinPacket>? {
+    private fun packetsForTransport(packet: SkeinPacket, useFec: Boolean): List<SkeinPacket>? {
         if (packet.type == MessageType.FRAGMENT.value) {
             return listOf(packet)
         }
 
         val manager = fragmentManager ?: return listOf(packet)
         return try {
-            val fragments = manager.createFragments(packet)
+            val fragments = if (useFec && isFecEligible(packet)) {
+                manager.createFecFragments(packet) ?: manager.createFragments(packet)
+            } else manager.createFragments(packet)
             if (fragments.isEmpty()) {
                 Log.e(logTag, "Fragment manager returned no packets for packet type ${packet.type}")
                 null
@@ -117,6 +127,9 @@ class FragmentingPacketSender(
             null
         }
     }
+
+    private fun isFecEligible(packet: SkeinPacket): Boolean =
+        packet.type == MessageType.MESSAGE.value || packet.type == MessageType.FILE_TRANSFER.value
 
     private fun transferIdFor(routed: RoutedPacket): String? {
         routed.transferId?.let { return it }

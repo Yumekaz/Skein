@@ -5,6 +5,9 @@ import com.skein.android.protocol.SkeinPacket
 import com.skein.android.protocol.MessageType
 import com.skein.android.protocol.MessagePadding
 import com.skein.android.model.FragmentPayload
+import com.skein.android.fec.FecConfig
+import com.skein.android.fec.FecFragmentPayload
+import java.security.MessageDigest
 import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -36,6 +39,10 @@ class FragmentManager {
 
     private val fragmentStateLock = Any()
     private var globalBufferedBytes: Long = 0L
+    private val fecFragments = ConcurrentHashMap<String, MutableMap<Int, ByteArray>>()
+    private val fecMetadata = ConcurrentHashMap<String, FecFragmentPayload>()
+    private val fecCreatedAt = ConcurrentHashMap<String, Long>()
+    private val fecCumulativeSize = ConcurrentHashMap<String, Int>()
 
     // Delegate for callbacks
     var delegate: FragmentManagerDelegate? = null
@@ -149,12 +156,52 @@ class FragmentManager {
             return emptyList()
         }
     }
+
+    /**
+     * Creates an opt-in FEC block. Larger packets deliberately fall back to legacy fragmentation
+     * until multi-block FEC reassembly is available.
+     */
+    fun createFecFragments(packet: SkeinPacket): List<SkeinPacket>? {
+        val encoded = packet.toBinaryData() ?: return null
+        val fullData = MessagePadding.unpad(encoded)
+        if (fullData.size <= FRAGMENT_SIZE_THRESHOLD || fullData.size > FecConfig.MAX_BLOCK_BYTES) return null
+        val shardSize = (fullData.size + FecConfig.DATA_SHARDS - 1) / FecConfig.DATA_SHARDS
+        if (shardSize <= 0 || shardSize > MAX_FRAGMENT_SIZE - FecFragmentPayload.HEADER_SIZE) return null
+        val data = List(FecConfig.DATA_SHARDS) { shardIndex ->
+            ByteArray(shardSize).also { target ->
+                val offset = shardIndex * shardSize
+                if (offset < fullData.size) {
+                    val length = minOf(shardSize, fullData.size - offset)
+                    System.arraycopy(fullData, offset, target, 0, length)
+                }
+            }
+        }
+        val transferId = MessageDigest.getInstance("SHA-256").digest(fullData).copyOf(FecFragmentPayload.TRANSFER_ID_BYTES)
+        return FecConfig.codec.encode(data).mapIndexed { index, shard ->
+            val payload = FecFragmentPayload(
+                transferId, 0, index, FecConfig.DATA_SHARDS, FecConfig.PARITY_SHARDS,
+                fullData.size, packet.type, shard
+            ).encode()
+            SkeinPacket(
+                version = if (packet.route != null) 2u else 1u,
+                type = MessageType.FRAGMENT.value,
+                ttl = packet.ttl,
+                senderID = packet.senderID,
+                recipientID = packet.recipientID,
+                timestamp = packet.timestamp,
+                payload = payload,
+                route = packet.route,
+                signature = null
+            )
+        }
+    }
     
     /**
      * Handle incoming fragment - 100% iOS Compatible  
      * Matches iOS handleFragment() implementation exactly
      */
     fun handleFragment(packet: SkeinPacket): SkeinPacket? {
+        FecFragmentPayload.decode(packet.payload)?.let { return handleFecFragment(it) }
         // iOS: guard packet.payload.count > 13 else { return }
         if (packet.payload.size < FragmentPayload.HEADER_SIZE) {
             Log.w(TAG, "Fragment packet too small: ${packet.payload.size}")
@@ -289,6 +336,65 @@ class FragmentManager {
         return null
     }
 
+    private fun handleFecFragment(fragment: FecFragmentPayload): SkeinPacket? {
+        val id = fragment.transferId.joinToString("") { "%02x".format(it) } + ":${fragment.blockIndex}"
+        synchronized(fragmentStateLock) {
+            if (fragment.originalType != MessageType.MESSAGE.value && fragment.originalType != MessageType.FILE_TRANSFER.value) {
+                Log.w(TAG, "Rejecting FEC fragment for non-message payload type ${fragment.originalType}")
+                return null
+            }
+            val isNewSet = !fecFragments.containsKey(id)
+            if (isNewSet && incomingFragments.size + fecFragments.size >= com.skein.android.util.AppConstants.Fragmentation.MAX_ACTIVE_FRAGMENT_SETS) {
+                Log.w(TAG, "Rejecting FEC block $id: too many active fragment sets")
+                return null
+            }
+            val shards = fecFragments.getOrPut(id) { mutableMapOf() }
+            val existing = fecMetadata.putIfAbsent(id, fragment)
+            if (existing != null && (
+                    existing.originalLength != fragment.originalLength ||
+                        existing.originalType != fragment.originalType ||
+                        existing.dataShards != fragment.dataShards ||
+                        existing.parityShards != fragment.parityShards ||
+                        existing.shard.size != fragment.shard.size
+                    )
+            ) {
+                removeFecSetLocked(id)
+                return null
+            }
+            if (isNewSet) fecCreatedAt[id] = System.currentTimeMillis()
+            val oldShard = shards[fragment.shardIndex]
+            if (oldShard != null) return null // Duplicate shards are harmless and do not consume more memory.
+            if (shards.size >= FecConfig.DATA_SHARDS + FecConfig.PARITY_SHARDS) return null
+            val currentSize = fecCumulativeSize[id] ?: 0
+            val newSize = currentSize + fragment.shard.size
+            val maxTotalBytes = com.skein.android.util.AppConstants.Fragmentation.MAX_FRAGMENT_TOTAL_BYTES
+            if (newSize > maxTotalBytes || globalBufferedBytes + fragment.shard.size > com.skein.android.util.AppConstants.Fragmentation.MAX_GLOBAL_FRAGMENT_TOTAL_BYTES) {
+                Log.w(TAG, "Rejecting FEC fragment for $id: reassembly memory limit exceeded")
+                if (isNewSet) removeFecSetLocked(id)
+                return null
+            }
+            shards[fragment.shardIndex] = fragment.shard
+            fecCumulativeSize[id] = newSize
+            globalBufferedBytes += fragment.shard.size
+            if (shards.size < FecConfig.DATA_SHARDS) return null
+            val all = arrayOfNulls<ByteArray>(FecConfig.DATA_SHARDS + FecConfig.PARITY_SHARDS)
+            shards.forEach { (index, shard) -> all[index] = shard }
+            val recovered = runCatching { FecConfig.codec.reconstruct(all) }.getOrNull() ?: return null
+            val fullData = recovered.take(FecConfig.DATA_SHARDS).flatMap { it.asIterable() }
+                .take(fragment.originalLength).toByteArray()
+            removeFecSetLocked(id)
+            return SkeinPacket.fromBinaryData(fullData)?.copy(ttl = 0u)
+        }
+    }
+
+    private fun removeFecSetLocked(id: String) {
+        fecFragments.remove(id)
+        fecMetadata.remove(id)
+        fecCreatedAt.remove(id)
+        val bytes = fecCumulativeSize.remove(id)?.toLong() ?: 0L
+        if (bytes != 0L) globalBufferedBytes = (globalBufferedBytes - bytes).coerceAtLeast(0L)
+    }
+
     private fun removeFragmentSetLocked(fragmentIDString: String) {
         incomingFragments.remove(fragmentIDString)
         fragmentMetadata.remove(fragmentIDString)
@@ -328,8 +434,13 @@ class FragmentManager {
                 removeFragmentSetLocked(fragmentID)
             }
 
-            if (oldFragments.isNotEmpty()) {
-                Log.d(TAG, "Cleaned up ${oldFragments.size} old fragment sets (iOS compatible)")
+            val oldFecBlocks = fecCreatedAt.filter { it.value < cutoff }.map { it.key }
+            for (blockID in oldFecBlocks) {
+                removeFecSetLocked(blockID)
+            }
+
+            if (oldFragments.isNotEmpty() || oldFecBlocks.isNotEmpty()) {
+                Log.d(TAG, "Cleaned up ${oldFragments.size} legacy and ${oldFecBlocks.size} FEC fragment sets")
             }
         }
     }
@@ -342,6 +453,7 @@ class FragmentManager {
             return buildString {
                 appendLine("=== Fragment Manager Debug Info (iOS Compatible) ===")
                 appendLine("Active Fragment Sets: ${incomingFragments.size}")
+                appendLine("Active FEC Blocks: ${fecFragments.size}")
                 appendLine("Fragment Size Threshold: $FRAGMENT_SIZE_THRESHOLD bytes")
                 appendLine("Max Fragment Size: $MAX_FRAGMENT_SIZE bytes")
                 appendLine("Global Buffered Bytes: $globalBufferedBytes")
@@ -377,6 +489,10 @@ class FragmentManager {
             incomingFragments.clear()
             fragmentMetadata.clear()
             fragmentCumulativeSize.clear()
+            fecFragments.clear()
+            fecMetadata.clear()
+            fecCreatedAt.clear()
+            fecCumulativeSize.clear()
             globalBufferedBytes = 0L
         }
     }

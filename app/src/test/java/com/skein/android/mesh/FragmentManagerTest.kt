@@ -180,6 +180,28 @@ class FragmentManagerTest {
         assertTrue("Payload content should match", originalPacket.payload.contentEquals(reassembledPacket.payload))
     }
 
+    @Test
+    fun `FEC reassembles a file after four out of order losses`() {
+        val originalPayload = ByteArray(1_800).also { Random(17).nextBytes(it) }
+        val originalPacket = SkeinPacket(
+            version = 1u,
+            type = MessageType.FILE_TRANSFER.value,
+            senderID = hexStringToByteArray(senderID),
+            recipientID = hexStringToByteArray(recipientID),
+            timestamp = System.currentTimeMillis().toULong(),
+            payload = originalPayload,
+            ttl = 7u
+        )
+
+        val fragments = requireNotNull(fragmentManager.createFecFragments(originalPacket))
+        assertEquals("8 data shards plus 4 parity shards", 12, fragments.size)
+        val delivered = fragments.filterIndexed { index, _ -> index !in setOf(1, 4, 8, 11) }.reversed()
+        val reassembled = delivered.mapNotNull(fragmentManager::handleFragment).single()
+
+        assertEquals(originalPacket.type, reassembled.type)
+        assertTrue(originalPacket.payload.contentEquals(reassembled.payload))
+    }
+
     private fun hexStringToByteArray(hexString: String): ByteArray {
         val result = ByteArray(8)
         for (i in 0 until 8) {

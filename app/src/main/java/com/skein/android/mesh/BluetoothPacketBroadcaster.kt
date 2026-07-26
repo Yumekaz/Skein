@@ -158,7 +158,11 @@ class BluetoothPacketBroadcaster(
         characteristic: BluetoothGattCharacteristic?
     ): Boolean {
         if (!hasPeerConnection(targetPeerID)) return false
-        return fragmentingSender.send(routed, "BLE peer ${targetPeerID.take(8)}") { packet ->
+        return fragmentingSender.send(
+            routed,
+            "BLE peer ${targetPeerID.take(8)}",
+            useFec = com.skein.android.fec.FecCapabilityRegistry.supports(targetPeerID)
+        ) { packet ->
             sendSinglePacketToPeer(packet, targetPeerID, gattServer, characteristic)
         }
     }
@@ -240,7 +244,11 @@ class BluetoothPacketBroadcaster(
         characteristic: BluetoothGattCharacteristic?
     ): Boolean {
         if (!hasPeerConnection(targetPeerID)) return false
-        return fragmentingSender.send(routed, "BLE peer ${targetPeerID.take(8)}") { packet ->
+        return fragmentingSender.send(
+            routed,
+            "BLE peer ${targetPeerID.take(8)}",
+            useFec = com.skein.android.fec.FecCapabilityRegistry.supports(targetPeerID)
+        ) { packet ->
             sendSinglePacketToPeer(packet, targetPeerID, gattServer, characteristic)
         }
     }

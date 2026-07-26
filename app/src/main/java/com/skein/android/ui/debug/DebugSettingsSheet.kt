@@ -113,6 +113,7 @@ fun DebugSettingsSheet(
     val gattServerEnabled by manager.gattServerEnabled.collectAsState()
     val gattClientEnabled by manager.gattClientEnabled.collectAsState()
     val packetRelayed by manager.packetRelayEnabled.collectAsState()
+    val fecLossPercent by manager.fecLossPercent.collectAsState()
     val maxOverall by manager.maxConnectionsOverall.collectAsState()
     val maxServer by manager.maxServerConnections.collectAsState()
     val maxClient by manager.maxClientConnections.collectAsState()
@@ -369,6 +370,13 @@ fun DebugSettingsSheet(
                             Spacer(Modifier.weight(1f))
                             Switch(checked = packetRelayed, onCheckedChange = { manager.setPacketRelayEnabled(it) })
                         }
+                        Text("FEC demo loss: $fecLossPercent% (debug builds only)", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                        Slider(
+                            value = fecLossPercent.toFloat(),
+                            onValueChange = { manager.setFecLossPercent(it.toInt()) },
+                            valueRange = 0f..90f,
+                            steps = 8
+                        )
                         // Removed aggregate labels; we will show per-direction compact labels below titles
                         // Toggle: overall vs per-connection vs per-peer
                         var graphMode by rememberSaveable { mutableStateOf(GraphMode.OVERALL) }

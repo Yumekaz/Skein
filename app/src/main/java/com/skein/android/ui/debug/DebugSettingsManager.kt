@@ -39,6 +39,8 @@ class DebugSettingsManager private constructor() {
     
     private val _packetRelayEnabled = MutableStateFlow(true)
     val packetRelayEnabled: StateFlow<Boolean> = _packetRelayEnabled.asStateFlow()
+    private val _fecLossPercent = MutableStateFlow(0)
+    val fecLossPercent: StateFlow<Int> = _fecLossPercent.asStateFlow()
 
     // Master transport toggles
     private val _bleEnabled = MutableStateFlow(true)
@@ -71,6 +73,8 @@ class DebugSettingsManager private constructor() {
             _gattServerEnabled.value = DebugPreferenceManager.getGattServerEnabled(true)
             _gattClientEnabled.value = DebugPreferenceManager.getGattClientEnabled(true)
             _packetRelayEnabled.value = DebugPreferenceManager.getPacketRelayEnabled(true)
+            _fecLossPercent.value = DebugPreferenceManager.getFecLossPercent(0).coerceIn(0, 90)
+            com.skein.android.fec.FecDebugPacketLoss.configure(_fecLossPercent.value)
             _maxConnectionsOverall.value = DebugPreferenceManager.getMaxConnectionsOverall(8)
             _maxServerConnections.value = DebugPreferenceManager.getMaxConnectionsServer(8)
             _maxClientConnections.value = DebugPreferenceManager.getMaxConnectionsClient(8)
@@ -279,6 +283,14 @@ class DebugSettingsManager private constructor() {
         addDebugMessage(DebugMessage.SystemMessage(
             if (enabled) "📡 Packet relay enabled" else "🚫 Packet relay disabled"
         ))
+    }
+
+    fun setFecLossPercent(value: Int) {
+        val clamped = value.coerceIn(0, 90)
+        DebugPreferenceManager.setFecLossPercent(clamped)
+        _fecLossPercent.value = clamped
+        com.skein.android.fec.FecDebugPacketLoss.configure(clamped)
+        addDebugMessage(DebugMessage.SystemMessage("🧪 FEC demo packet loss set to $clamped%"))
     }
 
     fun setBleEnabled(enabled: Boolean) {

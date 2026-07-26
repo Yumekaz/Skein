@@ -271,6 +271,7 @@ class PeerManager {
      */
     fun removePeer(peerID: String, notifyDelegate: Boolean = true) {
         val removed = peers.remove(peerID)
+        com.skein.android.fec.FecCapabilityRegistry.remove(peerID)
         peerRSSI.remove(peerID)
         announcedPeers.remove(peerID)
         announcedToPeers.remove(peerID)

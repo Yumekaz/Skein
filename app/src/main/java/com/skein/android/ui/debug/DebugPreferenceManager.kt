@@ -17,6 +17,7 @@ object DebugPreferenceManager {
     private const val KEY_MAX_CONN_SERVER = "max_connections_server"
     private const val KEY_MAX_CONN_CLIENT = "max_connections_client"
     private const val KEY_SEEN_PACKET_CAP = "seen_packet_capacity"
+    private const val KEY_FEC_LOSS_PERCENT = "fec_loss_percent"
     // GCS keys (no migration/back-compat)
     private const val KEY_GCS_MAX_BYTES = "gcs_max_filter_bytes"
     private const val KEY_GCS_FPR = "gcs_filter_fpr_percent"
@@ -89,6 +90,13 @@ object DebugPreferenceManager {
 
     fun setSeenPacketCapacity(value: Int) {
         if (ready()) prefs.edit().putInt(KEY_SEEN_PACKET_CAP, value).apply()
+    }
+
+    fun getFecLossPercent(default: Int = 0): Int =
+        if (ready()) prefs.getInt(KEY_FEC_LOSS_PERCENT, default) else default
+
+    fun setFecLossPercent(value: Int) {
+        if (ready()) prefs.edit().putInt(KEY_FEC_LOSS_PERCENT, value).apply()
     }
 
     fun getGcsMaxFilterBytes(default: Int = 400): Int =

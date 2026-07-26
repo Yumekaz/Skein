@@ -53,7 +53,11 @@ class ReedSolomonCodec(val dataShards: Int = 8, val parityShards: Int = 4) {
         for (pivotColumn in 0 until size) {
             val pivotRow = (pivotColumn until size).firstOrNull { work[it][pivotColumn].toInt() and 0xff != 0 }
                 ?: throw IllegalArgumentException("Singular shard matrix")
-            if (pivotRow != pivotColumn) work[pivotRow] = work[pivotColumn].also { work[pivotColumn] = work[pivotRow] }
+            if (pivotRow != pivotColumn) {
+                val temporary = work[pivotRow]
+                work[pivotRow] = work[pivotColumn]
+                work[pivotColumn] = temporary
+            }
             val scale = inverse(work[pivotColumn][pivotColumn].toInt() and 0xff)
             for (col in work[pivotColumn].indices) work[pivotColumn][col] = multiply(work[pivotColumn][col].toInt() and 0xff, scale).toByte()
             for (row in 0 until size) if (row != pivotColumn) {

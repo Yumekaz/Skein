@@ -141,6 +141,7 @@ data class IdentityAnnouncement(
         if (nickname != other.nickname) return false
         if (!noisePublicKey.contentEquals(other.noisePublicKey)) return false
         if (!signingPublicKey.contentEquals(other.signingPublicKey)) return false
+        if (fecVersion != other.fecVersion) return false
         
         return true
     }
@@ -149,6 +150,7 @@ data class IdentityAnnouncement(
         var result = nickname.hashCode()
         result = 31 * result + noisePublicKey.contentHashCode()
         result = 31 * result + signingPublicKey.contentHashCode()
+        result = 31 * result + (fecVersion ?: 0)
         return result
     }
     
