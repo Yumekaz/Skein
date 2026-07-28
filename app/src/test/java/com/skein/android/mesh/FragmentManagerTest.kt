@@ -202,6 +202,91 @@ class FragmentManagerTest {
         assertTrue(originalPacket.payload.contentEquals(reassembled.payload))
     }
 
+    @Test
+    fun `FEC reassembles multiple blocks after loss and reordering`() {
+        val originalPayload = ByteArray(com.skein.android.fec.FecConfig.MAX_BLOCK_BYTES * 2 + 750)
+            .also { Random(23).nextBytes(it) }
+        val originalPacket = SkeinPacket(
+            version = 1u,
+            type = MessageType.FILE_TRANSFER.value,
+            senderID = hexStringToByteArray(senderID),
+            recipientID = hexStringToByteArray(recipientID),
+            timestamp = System.currentTimeMillis().toULong(),
+            payload = originalPayload,
+            ttl = 7u
+        )
+
+        val fragments = requireNotNull(fragmentManager.createFecFragments(originalPacket))
+        assertEquals("three FEC blocks", 36, fragments.size)
+        val delivered = fragments.filterIndexed { index, _ -> index % 12 !in setOf(0, 5, 10) }.reversed()
+        val reassembled = delivered.mapNotNull(fragmentManager::handleFragment).single()
+
+        assertEquals(originalPacket.type, reassembled.type)
+        assertTrue(originalPacket.payload.contentEquals(reassembled.payload))
+    }
+
+    @Test
+    fun `FEC fails cleanly beyond parity capacity`() {
+        val packet = SkeinPacket(
+            version = 1u, type = MessageType.FILE_TRANSFER.value,
+            senderID = hexStringToByteArray(senderID), recipientID = hexStringToByteArray(recipientID),
+            timestamp = System.currentTimeMillis().toULong(), payload = ByteArray(1_800) { it.toByte() }, ttl = 7u
+        )
+        val fragments = requireNotNull(fragmentManager.createFecFragments(packet))
+        // Eight data plus four parity: losing five fragments cannot recover.
+        val result = fragments.filterIndexed { index, _ -> index !in setOf(0, 1, 2, 3, 4) }
+            .mapNotNull(fragmentManager::handleFragment)
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `duplicate FEC fragments do not duplicate delivery`() {
+        val packet = SkeinPacket(
+            version = 1u, type = MessageType.FILE_TRANSFER.value,
+            senderID = hexStringToByteArray(senderID), recipientID = hexStringToByteArray(recipientID),
+            timestamp = System.currentTimeMillis().toULong(), payload = ByteArray(1_800) { (it * 7).toByte() }, ttl = 7u
+        )
+        val fragments = requireNotNull(fragmentManager.createFecFragments(packet))
+        val results = (fragments.take(7) + fragments.take(7) + fragments.drop(7).take(1))
+            .mapNotNull(fragmentManager::handleFragment)
+        assertEquals(1, results.size)
+        assertTrue(packet.payload.contentEquals(results.single().payload))
+    }
+
+    @Test
+    fun `incomplete FEC blocks expire without later delivery`() {
+        val packet = SkeinPacket(
+            version = 1u, type = MessageType.FILE_TRANSFER.value,
+            senderID = hexStringToByteArray(senderID), recipientID = hexStringToByteArray(recipientID),
+            timestamp = System.currentTimeMillis().toULong(), payload = ByteArray(1_800) { it.toByte() }, ttl = 7u
+        )
+        val fragments = requireNotNull(fragmentManager.createFecFragments(packet))
+        fragments.take(7).forEach { assertEquals(null, fragmentManager.handleFragment(it)) }
+
+        fragmentManager.cleanupOldFragments(System.currentTimeMillis() + 60_000)
+
+        val results = fragments.drop(7).mapNotNull(fragmentManager::handleFragment)
+        assertTrue("expired FEC state must not be reconstructed by a later shard", results.isEmpty())
+    }
+
+    @Test
+    fun `FEC supports large bounded transfers and rejects oversized frames`() {
+        val nearLimit = SkeinPacket(
+            version = 2u, type = MessageType.FILE_TRANSFER.value,
+            senderID = hexStringToByteArray(senderID), recipientID = hexStringToByteArray(recipientID),
+            timestamp = System.currentTimeMillis().toULong(),
+            // The cap applies to the serialized packet frame, not only its application payload.
+            payload = ByteArray(1_000_000).also { Random(31).nextBytes(it) }, ttl = 7u
+        )
+        val fragments = requireNotNull(fragmentManager.createFecFragments(nearLimit))
+        assertEquals("313 blocks at 12 shards each", 313 * 12, fragments.size)
+
+        val oversized = nearLimit.copy(
+            payload = ByteArray(com.skein.android.fec.FecConfig.MAX_TRANSFER_BYTES).also { Random(32).nextBytes(it) }
+        )
+        assertEquals(null, fragmentManager.createFecFragments(oversized))
+    }
+
     private fun hexStringToByteArray(hexString: String): ByteArray {
         val result = ByteArray(8)
         for (i in 0 until 8) {

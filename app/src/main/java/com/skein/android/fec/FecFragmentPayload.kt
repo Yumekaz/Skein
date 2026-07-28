@@ -34,6 +34,8 @@ data class FecFragmentPayload(
     companion object {
         private val MAGIC = byteArrayOf(0x53, 0x46, 0x45, 0x43) // SFEC
         const val TRANSFER_ID_BYTES = 8
+        const val FINAL_BLOCK_FLAG = 0x8000
+        const val BLOCK_INDEX_MASK = 0x7fff
         const val HEADER_SIZE = 4 + 1 + TRANSFER_ID_BYTES + 2 + 1 + 1 + 1 + 4 + 1 + 4
 
         fun decode(bytes: ByteArray): FecFragmentPayload? = runCatching {
@@ -51,10 +53,14 @@ data class FecFragmentPayload(
             val checksum = buffer.int
             val shard = ByteArray(buffer.remaining()); buffer.get(shard)
             require(data == FecConfig.DATA_SHARDS && parity == FecConfig.PARITY_SHARDS)
-            require(originalLength in 0..FecConfig.MAX_BLOCK_BYTES)
+            require(originalLength in 0..FecConfig.MAX_TRANSFER_BYTES)
             require(shardIndex < data + parity)
             require(CRC32().apply { update(shard) }.value.toInt() == checksum)
             FecFragmentPayload(id, block, shardIndex, data, parity, originalLength, type, shard)
         }.getOrNull()
     }
+
+    /** Index inside a transfer. The high bit of [blockIndex] marks its last block. */
+    val transferBlockIndex: Int get() = blockIndex and BLOCK_INDEX_MASK
+    val isFinalBlock: Boolean get() = blockIndex and FINAL_BLOCK_FLAG != 0
 }

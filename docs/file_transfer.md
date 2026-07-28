@@ -143,6 +143,15 @@ File transfers reuse the mesh broadcaster’s fragmentation logic:
 - Fragments are sent with a short inter‑fragment delay (currently ~200 ms; matches iOS/Rust behavior notes in code).
 - When only one fragment is needed, send as a single packet.
 
+### 2.2 Opt-in FEC for direct BLE transfers
+
+For direct BLE message and file traffic, two Skein peers that both advertise the same FEC version may use Reed–Solomon FEC instead of legacy fragments. The current codec uses eight data shards and four parity shards per block. A receiver can reconstruct a block after losing up to four shards; it rejects corrupt shards through a per-shard CRC and keeps bounded memory/time limits during reassembly.
+
+- FEC is capability-gated. Missing, legacy, or mismatched capability advertisements use legacy fragmentation.
+- Announcements, handshakes, acknowledgements, and other control packets remain on the legacy path.
+- Large transfers are split into bounded FEC blocks and assembled only after all recovered blocks are available.
+- The Debug Settings panel includes a deterministic FEC packet-loss control for repeatable demonstrations. It is disabled by default.
+
 ### 2.2 Transfer ID and progress events
 
 We derive a deterministic transfer ID to track progress:

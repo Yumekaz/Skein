@@ -37,7 +37,7 @@ Skein is based on the open-source [bitchat-android](https://github.com/permissio
 
 ### Roadmap (research)
 
-Planned differentiators beyond the base mesh stack include **causal message ordering** and **forward error correction (FEC)** for lossy mesh conditions. These are engineering goals, not claims of current production readiness.
+Reliability extensions implemented for Skein include deterministic Lamport ordering for mesh messages and opt-in Reed–Solomon FEC for direct BLE message/file transfers between matching-capability peers. FEC stays off for legacy/iOS peers and control traffic; it uses 8 data plus 4 parity shards per bounded block, supports multi-block v2 packet frames up to 1 MiB, and falls back to normal fragmentation whenever capability is absent or a transfer is outside the bounded FEC path. This remains an engineering feature, not a claim of production security review.
 
 ---
 
